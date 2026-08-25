@@ -12,6 +12,11 @@ import { ComplianceScreen } from '@/features/compliance/ComplianceScreen'
 import { InvoicingScreen } from '@/features/invoicing/InvoicingScreen'
 import { SettlementsScreen } from '@/features/settlements/SettlementsScreen'
 import { FuelScreen } from '@/features/fuel/FuelScreen'
+import { DriverMobileScreen } from '@/features/driver/DriverMobileScreen'
+import { InspectionsScreen } from '@/features/inspections/InspectionsScreen'
+import { ServiceLogScreen } from '@/features/servicelog/ServiceLogScreen'
+import { OnboardingScreen } from '@/features/onboarding/OnboardingScreen'
+import { SettingsScreen } from '@/features/settings/SettingsScreen'
 
 function Router() {
   const { section } = useStore()
@@ -28,6 +33,11 @@ function Router() {
     case 'invoicing': return <InvoicingScreen />
     case 'settlements': return <SettlementsScreen />
     case 'fuel': return <FuelScreen />
+    case 'driver': return <DriverMobileScreen />
+    case 'inspections': return <InspectionsScreen />
+    case 'servicelog': return <ServiceLogScreen />
+    case 'onboarding': return <OnboardingScreen />
+    case 'settings': return <SettingsScreen />
     default: return <DashboardScreen />
   }
 }

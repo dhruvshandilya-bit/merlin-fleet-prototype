@@ -1,12 +1,14 @@
-import React from 'react'
+import React, { useState } from 'react'
 import {
   Truck, Container, Users, Package, Radio, Map, Wrench, ShieldCheck, LayoutDashboard,
   Search, Bell, ChevronDown, DollarSign, FolderKanban, ShoppingCart, Boxes,
-  FileText, Wallet, Fuel, Sparkles,
+  FileText, Wallet, Fuel, Sparkles, ClipboardCheck, ClipboardList, UserPlus, Settings, Check, Smartphone,
   type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useStore, type Section } from '@/lib/store'
+import type { OrgFeatures } from '@/lib/orgConfig'
+import { INSPECTION_ONLY, INSPECTION_SECTIONS } from '@/lib/appMode'
 
 /* Merlin light module rail — Fleet is active */
 const MODULES: { key: string; label: string; icon: LucideIcon; active?: boolean }[] = [
@@ -17,25 +19,38 @@ const MODULES: { key: string; label: string; icon: LucideIcon; active?: boolean 
   { key: 'fleet', label: 'Fleet', icon: Truck, active: true },
 ]
 
-type Group = 'ops' | 'billing'
-const BRANCHES: { key: Section; label: string; icon: LucideIcon; group: Group }[] = [
+type Group = 'ops' | 'safety' | 'billing' | 'admin'
+const GROUP_LABEL: Record<Group, string> = { ops: 'Operations', safety: 'Safety & DOT', billing: 'Billing', admin: 'Admin' }
+
+/** `feature` gates the item on the active org's config. */
+const BRANCHES: { key: Section; label: string; icon: LucideIcon; group: Group; feature?: keyof OrgFeatures }[] = [
   { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, group: 'ops' },
   { key: 'dispatch', label: 'Dispatch', icon: Radio, group: 'ops' },
   { key: 'loads', label: 'Loads', icon: Package, group: 'ops' },
   { key: 'vehicles', label: 'Trucks', icon: Truck, group: 'ops' },
   { key: 'trailers', label: 'Trailers', icon: Container, group: 'ops' },
   { key: 'drivers', label: 'Drivers', icon: Users, group: 'ops' },
-  { key: 'map', label: 'Live Map', icon: Map, group: 'ops' },
-  { key: 'maintenance', label: 'Maintenance', icon: Wrench, group: 'ops' },
-  { key: 'compliance', label: 'Compliance', icon: ShieldCheck, group: 'ops' },
+  { key: 'map', label: 'Live Map', icon: Map, group: 'ops', feature: 'locationTracking' },
+  { key: 'driver', label: 'Driver App', icon: Smartphone, group: 'safety' },
+  { key: 'inspections', label: 'Inspections', icon: ClipboardCheck, group: 'safety' },
+  { key: 'servicelog', label: 'Service Log', icon: ClipboardList, group: 'safety', feature: 'serviceLog' },
+  { key: 'maintenance', label: 'Maintenance', icon: Wrench, group: 'safety' },
+  { key: 'compliance', label: 'Compliance', icon: ShieldCheck, group: 'safety' },
   { key: 'invoicing', label: 'Invoicing', icon: FileText, group: 'billing' },
   { key: 'settlements', label: 'Settlements', icon: Wallet, group: 'billing' },
   { key: 'fuel', label: 'Fuel & Tolls', icon: Fuel, group: 'billing' },
+  { key: 'onboarding', label: 'Onboarding', icon: UserPlus, group: 'admin' },
+  { key: 'settings', label: 'Configuration', icon: Settings, group: 'admin' },
 ]
 
 export function Shell({ children }: { children: React.ReactNode }) {
-  const { section, setSection, toasts } = useStore()
-  const activeBranch = BRANCHES.find((b) => b.key === section)
+  const { section, setSection, toasts, org, orgs, setOrgId } = useStore()
+  const [orgMenu, setOrgMenu] = useState(false)
+  const branches = BRANCHES
+    .filter((b) => !INSPECTION_ONLY || (INSPECTION_SECTIONS as readonly string[]).includes(b.key))
+    .filter((b) => !b.feature || org.features[b.feature])
+  const activeBranch = branches.find((b) => b.key === section)
+  const moduleLabel = INSPECTION_ONLY ? 'Vehicle Inspection' : 'Fleet'
 
   return (
     <div className="flex h-full w-full overflow-hidden bg-bg-weak-50">
@@ -48,7 +63,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <nav className="flex-1 overflow-y-auto px-4 pt-4">
           <p className="px-1 text-[11px] font-medium uppercase tracking-wider text-text-soft-400">Main</p>
           <ul className="mt-2 space-y-1">
-            {MODULES.map((m) => {
+            {(INSPECTION_ONLY ? [{ key: 'fleet', label: 'Vehicle Inspection', icon: ClipboardCheck, active: true }] : MODULES).map((m) => {
               const Icon = m.icon
               return (
                 <li key={m.key} className="relative">
@@ -70,8 +85,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <button className="flex w-full items-center gap-2 rounded px-1 py-1 hover:bg-bg-weak-50">
             <div className="flex h-7 w-7 flex-none items-center justify-center rounded-full bg-brand-500 text-xs font-medium text-white">RC</div>
             <div className="min-w-0 flex-1 text-left">
-              <p className="truncate text-sm font-medium text-text-strong-950">Dispatcher</p>
-              <p className="truncate text-xs text-text-soft-400">Rapid Carrier Co.</p>
+              <p className="truncate text-sm font-medium text-text-strong-950">Fleet Admin</p>
+              <p className="truncate text-xs text-text-soft-400">{org.name}</p>
             </div>
             <ChevronDown className="h-4 w-4 flex-none text-icon-sub-600" />
           </button>
@@ -84,11 +99,40 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <header className="flex h-16 flex-none items-center justify-between gap-4 border-b border-stroke-soft-200 bg-bg-white-0 px-6">
           <div className="flex items-center gap-2">
             <Truck size={18} className="text-brand-500" />
-            <span className="text-[15px] font-semibold text-text-strong-950">Fleet</span>
+            <span className="text-[15px] font-semibold text-text-strong-950">{moduleLabel}</span>
             <span className="text-text-soft-400">/</span>
             <span className="text-[13px] text-text-sub-600">{activeBranch?.label}</span>
           </div>
           <div className="flex items-center gap-3">
+            {/* Client switcher — flips the whole product between customers */}
+            <div className="relative">
+              <button onClick={() => setOrgMenu((o) => !o)}
+                className="flex items-center gap-2 rounded-lg border border-stroke-soft-200 bg-bg-white-0 px-2.5 py-1.5 text-sm shadow-sm transition-colors hover:bg-bg-weak-50">
+                <span className="flex h-6 w-6 items-center justify-center rounded-md bg-brand-500 text-[11px] font-semibold text-white">{org.initials}</span>
+                <span className="hidden font-medium text-text-strong-950 sm:inline">{org.name}</span>
+                <ChevronDown size={14} className="text-icon-sub-600" />
+              </button>
+              {orgMenu && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setOrgMenu(false)} />
+                  <div className="absolute right-0 z-50 mt-1 w-64 rounded-lg border border-stroke-soft-200 bg-bg-white-0 p-1 shadow-lg">
+                    <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-text-soft-400">Switch client</p>
+                    {orgs.map((o) => (
+                      <button key={o.id} onClick={() => { setOrgId(o.id); setOrgMenu(false) }}
+                        className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-bg-weak-50',
+                          o.id === org.id ? 'bg-bg-weak-50' : '')}>
+                        <span className="flex h-6 w-6 flex-none items-center justify-center rounded-md bg-brand-500 text-[11px] font-semibold text-white">{o.initials}</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-medium text-text-strong-950">{o.name}</span>
+                          <span className="block truncate text-[11px] text-text-soft-400">{o.industry}</span>
+                        </span>
+                        {o.id === org.id && <Check size={14} className="flex-none text-brand-500" />}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
             <button className="flex items-center gap-2 rounded-lg border border-stroke-soft-200 bg-bg-white-0 px-3 py-1.5 text-sm text-text-sub-600 shadow-sm transition-colors hover:bg-bg-weak-50">
               <Search size={15} className="text-text-sub-600" />
               <span className="hidden text-text-soft-400 md:inline">Search...</span>
@@ -104,17 +148,17 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        {/* Branch sub-nav (grouped Operations | Billing) */}
+        {/* Branch sub-nav (grouped Operations | Safety & DOT | Billing | Admin) */}
         <nav className="flex flex-none items-center gap-1 overflow-x-auto border-b border-stroke-soft-200 bg-bg-white-0 px-4">
-          {BRANCHES.map((b, i) => {
+          {branches.map((b, i) => {
             const Icon = b.icon
             const active = section === b.key
-            const showDivider = i > 0 && BRANCHES[i - 1].group !== b.group
+            const showDivider = i > 0 && branches[i - 1].group !== b.group
             return (
               <React.Fragment key={b.key}>
                 {showDivider && (
                   <span className="mx-2 flex items-center gap-1.5 whitespace-nowrap text-[10px] font-semibold uppercase tracking-wider text-text-soft-400">
-                    <span className="h-4 w-px bg-stroke-soft-200" />Billing
+                    <span className="h-4 w-px bg-stroke-soft-200" />{GROUP_LABEL[b.group]}
                   </span>
                 )}
                 <button

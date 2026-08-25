@@ -8,11 +8,15 @@ import {
   seedInvoices, seedDriverSettlements, seedCarrierSettlements, seedFuel, seedTolls,
 } from './data'
 import { uid } from './utils'
+import { SEED_ORGS, type OrgConfig } from './orgConfig'
+import { seedInspections, seedServiceLogs, type InspectionRecord, type ServiceLog } from './inspectionData'
+import { INSPECTION_ONLY } from './appMode'
 
 export type Section =
   | 'dashboard' | 'vehicles' | 'trailers' | 'drivers'
   | 'loads' | 'dispatch' | 'map' | 'maintenance' | 'compliance'
   | 'invoicing' | 'settlements' | 'fuel'
+  | 'driver' | 'inspections' | 'servicelog' | 'onboarding' | 'settings'
 
 interface Toast { id: string; message: string }
 
@@ -32,11 +36,28 @@ interface Store {
   setSection: (s: Section) => void
   toasts: Toast[]
   notify: (message: string) => void
+  // multi-tenant config
+  orgs: OrgConfig[]
+  orgId: string
+  org: OrgConfig
+  setOrgId: (id: string) => void
+  updateOrg: (id: string, updater: (o: OrgConfig) => OrgConfig) => void
+  addOrg: (o: OrgConfig) => void
+  // driver app persona (who is "signed in" on the mobile app)
+  currentDriverId: string
+  setCurrentDriverId: (id: string) => void
+  // inspections + service log
+  inspections: InspectionRecord[]
+  createInspection: (r: Partial<InspectionRecord>) => InspectionRecord
+  certifyInspection: (id: string, by: string, note: string) => void
+  serviceLogs: ServiceLog[]
+  createServiceLog: (s: Partial<ServiceLog>) => void
   // actions
   createLoad: (l: Partial<Load>) => Load
   createTruck: (t: Partial<Truck>) => void
   createTrailer: (t: Partial<Trailer>) => void
   createDriver: (d: Partial<Driver>) => void
+  assignDriver: (driverId: string, truckId: string | null) => void
   dispatchLoad: (loadId: string, driverId: string, truckId: string, trailerId: string) => void
   advanceLoad: (loadId: string, progress: number) => void
   deliverLoad: (loadId: string) => void
@@ -65,8 +86,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [carrierSettlements, setCarrierSettlements] = useState<CarrierSettlement[]>(seedCarrierSettlements)
   const [fuel] = useState<FuelTransaction[]>(seedFuel)
   const [tolls] = useState<TollTransaction[]>(seedTolls)
-  const [section, setSection] = useState<Section>('dashboard')
+  const [section, setSection] = useState<Section>(INSPECTION_ONLY ? 'inspections' : 'dashboard')
   const [toasts, setToasts] = useState<Toast[]>([])
+  const [orgs, setOrgs] = useState<OrgConfig[]>(SEED_ORGS)
+  const [orgId, setOrgIdState] = useState<string>(SEED_ORGS[0].id)
+  const [currentDriverId, setCurrentDriverId] = useState<string>('D-1')
+  const [inspections, setInspections] = useState<InspectionRecord[]>(seedInspections)
+  const [serviceLogs, setServiceLogs] = useState<ServiceLog[]>(seedServiceLogs)
+
+  const org = useMemo(() => orgs.find((o) => o.id === orgId) ?? orgs[0], [orgs, orgId])
 
   const notify = useCallback((message: string) => {
     const id = uid('toast')
@@ -136,6 +164,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     notify(`Driver ${name} added`)
   }, [notify])
 
+  const assignDriver = useCallback((driverId: string, truckId: string | null) => {
+    setDrivers((ds) => ds.map((d) => (d.id === driverId ? { ...d, assignedTruckId: truckId } : d)))
+    setTrucks((ts) => ts.map((t) => {
+      if (t.id === truckId) return { ...t, assignedDriverId: driverId }
+      if (t.assignedDriverId === driverId) return { ...t, assignedDriverId: null }
+      return t
+    }))
+    const d = drivers.find((x) => x.id === driverId)
+    const t = trucks.find((x) => x.id === truckId)
+    notify(truckId ? `${d?.name ?? 'Driver'} → Truck #${t?.unitNumber ?? ''}` : `${d?.name ?? 'Driver'} unassigned`)
+  }, [drivers, trucks, notify])
+
   const dispatchLoad = useCallback((loadId: string, driverId: string, truckId: string, trailerId: string) => {
     setLoads((ls) => ls.map((l) => (l.id === loadId ? { ...l, driverId, truckId, trailerId, status: 'DISPATCHED', flag: 'NONE' } : l)))
     setTrucks((ts) => ts.map((t) => (t.id === truckId ? { ...t, assignedDriverId: driverId, status: 'ACTIVE' } : t)))
@@ -187,14 +227,75 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     notify(`Settlement ${id} paid`)
   }, [notify])
 
+  const setOrgId = useCallback((id: string) => {
+    setOrgIdState(id)
+    const o = SEED_ORGS.find((x) => x.id === id)
+    notify(`Switched to ${o?.name ?? id}`)
+    // If a feature-gated screen is open that the new org disables, fall back.
+    setSection((s) => {
+      if (s === 'servicelog' && !o?.features.serviceLog) return 'inspections'
+      return s
+    })
+  }, [notify])
+
+  const updateOrg = useCallback((id: string, updater: (o: OrgConfig) => OrgConfig) => {
+    setOrgs((os) => os.map((o) => (o.id === id ? updater(o) : o)))
+  }, [])
+
+  const addOrg = useCallback((o: OrgConfig) => {
+    setOrgs((os) => [...os, o])
+    setOrgIdState(o.id)
+    notify(`Client "${o.name}" created`)
+  }, [notify])
+
+  const createInspection = useCallback((r: Partial<InspectionRecord>): InspectionRecord => {
+    const id = uid('INS')
+    const defectCount = r.defectCount ?? (r.results?.filter((x) => x.status === 'FAIL').length ?? 0)
+    const rec: InspectionRecord = {
+      id, orgId: r.orgId || orgId, type: r.type || 'PRE_TRIP',
+      driverId: r.driverId ?? null, driverName: r.driverName || 'Driver',
+      vehicleLabel: r.vehicleLabel || '—', trailerLabel: r.trailerLabel,
+      odometer: r.odometer ?? null, projectJobsite: r.projectJobsite, location: r.location,
+      dateTime: r.dateTime || '2026-07-30T07:00:00', results: r.results || [],
+      defectCount, safeToOperate: r.safeToOperate ?? true, safeToDrive: r.safeToDrive,
+      photos: r.photos ?? 0, signedBy: r.signedBy, remarks: r.remarks,
+      mechanic: r.mechanic, status: r.status || (defectCount > 0 ? 'NEEDS_REVIEW' : 'CLOSED'),
+    }
+    setInspections((xs) => [rec, ...xs])
+    notify(`Inspection ${id} submitted${defectCount ? ` · ${defectCount} defect(s)` : ''}`)
+    return rec
+  }, [orgId, notify])
+
+  const certifyInspection = useCallback((id: string, by: string, note: string) => {
+    setInspections((xs) => xs.map((r) => (r.id === id
+      ? { ...r, status: 'CLOSED', mechanic: { status: 'CERTIFIED', by, note, date: '2026-07-30T09:00:00' } }
+      : r)))
+    notify(`Inspection ${id} certified`)
+  }, [notify])
+
+  const createServiceLog = useCallback((s: Partial<ServiceLog>) => {
+    const id = uid('SVC')
+    const rec: ServiceLog = {
+      id, orgId: s.orgId || orgId, vehicleLabel: s.vehicleLabel || '—',
+      serviceType: s.serviceType || 'Service', date: s.date || '2026-07-30',
+      odometer: s.odometer || 0, vendor: s.vendor || '', cost: s.cost || 0,
+      nextDueDate: s.nextDueDate ?? null, nextDueOdometer: s.nextDueOdometer ?? null, notes: s.notes || '',
+    }
+    setServiceLogs((xs) => [rec, ...xs])
+    notify(`Service log ${id} added`)
+  }, [orgId, notify])
+
   const value = useMemo<Store>(() => ({
     trucks, trailers, drivers, loads, maintenance, safety,
     invoices, driverSettlements, carrierSettlements, fuel, tolls,
     section, setSection, toasts, notify,
-    createLoad, createTruck, createTrailer, createDriver, dispatchLoad, advanceLoad, deliverLoad, createMaintenance,
+    orgs, orgId, org, setOrgId, updateOrg, addOrg,
+    currentDriverId, setCurrentDriverId,
+    inspections, createInspection, certifyInspection, serviceLogs, createServiceLog,
+    createLoad, createTruck, createTrailer, createDriver, assignDriver, dispatchLoad, advanceLoad, deliverLoad, createMaintenance,
     releaseInvoice, markInvoicePaid, approveSettlement, paySettlement,
     truckById, trailerById, driverById,
-  }), [trucks, trailers, drivers, loads, maintenance, safety, invoices, driverSettlements, carrierSettlements, fuel, tolls, section, toasts, notify, createLoad, createTruck, createTrailer, createDriver, dispatchLoad, advanceLoad, deliverLoad, createMaintenance, releaseInvoice, markInvoicePaid, approveSettlement, paySettlement, truckById, trailerById, driverById])
+  }), [trucks, trailers, drivers, loads, maintenance, safety, invoices, driverSettlements, carrierSettlements, fuel, tolls, section, toasts, notify, orgs, orgId, org, setOrgId, updateOrg, addOrg, currentDriverId, inspections, createInspection, certifyInspection, serviceLogs, createServiceLog, createLoad, createTruck, createTrailer, createDriver, assignDriver, dispatchLoad, advanceLoad, deliverLoad, createMaintenance, releaseInvoice, markInvoicePaid, approveSettlement, paySettlement, truckById, trailerById, driverById])
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

@@ -76,3 +76,13 @@ body {
 .animate-drawer {
   animation: slideInRight 0.22s cubic-bezier(0.32, 0.72, 0, 1);
 }
+
+/* ---- DVIR print / Save-as-PDF ---- */
+@media print {
+  body { background: #fff !important; }
+  body * { visibility: hidden !important; }
+  #dvir-print, #dvir-print * { visibility: visible !important; }
+  #dvir-print { position: absolute; left: 0; top: 0; width: 100%; margin: 0; padding: 0; }
+  .no-print { display: none !important; }
+  @page { size: A4 portrait; margin: 12mm; }
+}

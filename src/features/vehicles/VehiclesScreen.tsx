@@ -8,13 +8,20 @@ import {
 import { AssetStatusBadge, assetStatusLabel, ExpiryBadge } from '@/lib/status'
 import { num, formatDate } from '@/lib/utils'
 import type { Truck } from '@/lib/types'
+import { Printer } from 'lucide-react'
+import { inspectionTypeLabel } from '@/lib/orgConfig'
+import { InspectionSheetOverlay } from '@/features/inspections/InspectionSheet'
 
 export function VehiclesScreen() {
-  const { trucks, drivers, maintenance, safety, createTruck, setSection, notify } = useStore()
+  const { trucks, drivers, maintenance, safety, org, inspections, serviceLogs, createTruck, setSection, notify } = useStore()
   const [selected, setSelected] = useState<Truck | null>(null)
   const [statusFilter, setStatusFilter] = useState<string>('ALL')
   const [tab, setTab] = useState('info')
   const [showAdd, setShowAdd] = useState(false)
+  const [sheetRecId, setSheetRecId] = useState<string | null>(null)
+  const vehicleInspections = (t: Truck) => inspections.filter((i) => i.orgId === org.id && i.vehicleLabel === `#${t.unitNumber}`)
+  const vehicleServices = (t: Truck) => serviceLogs.filter((s) => s.orgId === org.id && s.vehicleLabel === `#${t.unitNumber}`)
+  const sheetRec = inspections.find((i) => i.id === sheetRecId) || null
 
   const rows = trucks.filter((t) => statusFilter === 'ALL' || t.status === statusFilter)
   const driverName = (id?: string | null) => drivers.find((d) => d.id === id)?.name
@@ -102,6 +109,7 @@ export function VehiclesScreen() {
               tabs={[
                 { key: 'info', label: 'Info' },
                 { key: 'assign', label: 'Assignment' },
+                { key: 'inspections', label: 'Inspections', count: vehicleInspections(selected).length },
                 { key: 'maint', label: 'Maintenance', count: maintenance.filter((m) => m.assetId === selected.id).length },
                 { key: 'safety', label: 'Safety', count: safety.filter((s) => s.truckId === selected.id).length },
                 { key: 'docs', label: 'Documents', count: selected.docs.length },
@@ -148,6 +156,43 @@ export function VehiclesScreen() {
                 </div>
               )}
 
+              {tab === 'inspections' && (
+                <div className="space-y-4">
+                  <div>
+                    <SectionTitle info="Every DVIR / inspection submitted against this vehicle. Export any as a PDF.">Inspection history</SectionTitle>
+                    <div className="space-y-2">
+                      {vehicleInspections(selected).map((i) => (
+                        <div key={i.id} className="flex items-center justify-between gap-2 rounded-lg border border-border p-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[13px] font-semibold">{i.id}</span>
+                              <Badge tone="slate">{inspectionTypeLabel[i.type]}</Badge>
+                              {i.safeToOperate ? <Badge tone="green">Safe</Badge> : <Badge tone="red">{i.safeToDrive ? 'Defect' : 'OOS'}</Badge>}
+                            </div>
+                            <div className="mt-0.5 text-[12px] text-muted-foreground">{i.driverName} · {formatDate(i.dateTime)}{i.defectCount ? ` · ${i.defectCount} defect(s)` : ''}</div>
+                          </div>
+                          <Button variant="outline" size="sm" onClick={() => setSheetRecId(i.id)}><Printer size={13} />PDF</Button>
+                        </div>
+                      ))}
+                      {vehicleInspections(selected).length === 0 && <EmptyState icon={<ClipboardCheck size={28} />} title="No inspections" hint="No DVIRs recorded for this vehicle yet." />}
+                    </div>
+                  </div>
+                  {vehicleServices(selected).length > 0 && (
+                    <div>
+                      <SectionTitle>Service history</SectionTitle>
+                      <div className="space-y-2">
+                        {vehicleServices(selected).map((s) => (
+                          <div key={s.id} className="rounded-lg border border-border p-3">
+                            <div className="flex items-center justify-between"><span className="text-[13px] font-medium">{s.serviceType}</span><span className="text-[12px] text-muted-foreground">{formatDate(s.date)}</span></div>
+                            <div className="mt-0.5 text-[12px] text-muted-foreground">{num(s.odometer)} mi · {s.vendor}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {tab === 'maint' && (
                 <MaintList assetId={selected.id} />
               )}
@@ -191,6 +236,7 @@ export function VehiclesScreen() {
       </Drawer>
 
       <AddTruckModal open={showAdd} onClose={() => setShowAdd(false)} />
+      {sheetRec && <InspectionSheetOverlay record={sheetRec} onClose={() => setSheetRecId(null)} />}
     </div>
   )
 }
